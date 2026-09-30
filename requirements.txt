@@ -1,0 +1,19 @@
+# Runtime dependencies
+requests>=2.31.0          # HTTP client for Ollama API
+psutil>=5.9.0             # CPU / RAM metrics for get_system_info tool
+faster-whisper>=1.0.0     # Local offline Speech-to-Text inference (CTranslate2)
+piper-tts>=1.2.0          # Local offline neural Text-to-Speech synthesis (ONNX)
+sounddevice>=0.5.0        # Audio recording & playback via PortAudio
+numpy>=1.24.0             # Audio signal buffer processing
+
+# Optional: .env file support (main.py loads it if present; not required)
+python-dotenv>=1.0.0      # Load .env into os.environ at startup
+pywin32>=306              # Windows GUI and window management API
+ddgs>=9.16.0              # Free public web search client (no API key required)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Development / test dependencies
+# Install with:  pip install -r requirements-dev.txt
+# (kept separate to avoid bloating the runtime install)
+# ──────────────────────────────────────────────────────────────────────────────

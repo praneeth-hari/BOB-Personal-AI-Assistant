@@ -1,0 +1,59 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Environment / secrets ─────────────────────────────────────────────────────
+.env
+# Keep .env.example in version control (it has no secrets).
+
+# ── Test / coverage artefacts ─────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# ── Type checkers / linters ───────────────────────────────────────────────────
+.mypy_cache/
+.ruff_cache/
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Local Models / Weights ────────────────────────────────────────────────────
+models/
+*.onnx
+*.onnx.json
+*.bin
+*.pt
+
+# ── Scratch & logs ────────────────────────────────────────────────────────────
+scratch/
+*.log
+
+# ── Agent/IDE workflows ───────────────────────────────────────────────────────
+.agents/
+
+

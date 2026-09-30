@@ -1,0 +1,1 @@
+# BOB core package
