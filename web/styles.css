@@ -527,6 +527,139 @@ button { color: inherit; }
   font-size: 11px;
 }
 
+.pending-card {
+  margin: 12px 0 4px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-elevated);
+}
+
+.pending-card.stale {
+  opacity: 0.68;
+}
+
+.pending-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.pending-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.pending-expiry {
+  color: var(--muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.pending-summary {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 13.5px;
+}
+
+.pending-targets {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.pending-target {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.pending-target input {
+  margin-top: 3px;
+  accent-color: var(--accent);
+}
+
+.pending-target input:disabled + .pending-target-text {
+  opacity: 0.6;
+}
+
+.pending-target-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pending-target-name {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.pending-target-detail {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pending-warning {
+  margin-top: 3px;
+  color: var(--danger);
+  font-size: 11.5px;
+}
+
+.pending-total {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pending-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pending-button {
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.pending-button.approve {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.pending-button:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+
+.pending-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.pending-status {
+  margin: 8px 0 0;
+  min-height: 1em;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pending-status.success { color: var(--text); }
+.pending-status.error { color: var(--danger); }
+
 .error-message {
   padding: 10px 14px;
   border: 1px solid var(--danger);

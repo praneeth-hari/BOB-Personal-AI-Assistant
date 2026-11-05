@@ -187,13 +187,13 @@ class TestRequest:
             _client().chat_with_tools(USER, [SEARCH_SCHEMA])
         assert rec.payloads[0]["tools"] == [SEARCH_SCHEMA]
 
-    def test_all_eleven_bob_tools_sent_as_functions(self):
+    def test_all_bob_tools_sent_as_functions(self):
         rec = Recorder(_resp(_body_text("ok")))
         schemas = build_default_registry().get_tool_schemas()
         with patch(POST, side_effect=rec):
             _client().chat_with_tools(USER, schemas)
         tools = rec.payloads[0]["tools"]
-        assert len(tools) == 11
+        assert len(tools) == 13
         assert {t["type"] for t in tools} == {"function"}
         assert [t["function"]["name"] for t in tools] == [s["function"]["name"] for s in schemas]
 

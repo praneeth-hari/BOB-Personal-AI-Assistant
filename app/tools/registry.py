@@ -145,6 +145,8 @@ def build_default_registry() -> ToolRegistry:
     from app.tools.screen_brightness import SCREEN_BRIGHTNESS_TOOL
     from app.tools.window_control import WINDOW_CONTROL_TOOL
     from app.tools.web_search import WEB_SEARCH_TOOL
+    from app.tools.diagnose_system import DIAGNOSE_SYSTEM_TOOL
+    from app.tools.propose_cleanup import PROPOSE_CLEANUP_TOOL
 
     reg = ToolRegistry()
     reg.register(SYSTEM_INFO_TOOL)
@@ -158,6 +160,8 @@ def build_default_registry() -> ToolRegistry:
     reg.register(SCREEN_BRIGHTNESS_TOOL)
     reg.register(WINDOW_CONTROL_TOOL)
     reg.register(WEB_SEARCH_TOOL)
+    reg.register(DIAGNOSE_SYSTEM_TOOL)
+    reg.register(PROPOSE_CLEANUP_TOOL)
     logger.debug("Default tool registry built with %d tools.", len(reg))
     return reg
 

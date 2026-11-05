@@ -223,7 +223,10 @@ python -m app.interfaces.web
 | Method | Path | Purpose |
 |--------|------|---------|
 | `GET` | `/` | Serves the chat page |
-| `POST` | `/api/chat` | Send `{"message": "..."}`; returns `{"reply": "...", "tools_used": [...]}` |
+| `POST` | `/api/chat` | Send `{"message": "..."}`; returns `{"reply": "...", "tools_used": [...], "pending_actions": [...]}` |
+| `GET` | `/api/pending` | Returns the current approval-gated cleanup plan, if any |
+| `POST` | `/api/approve` | Body `{"plan_id": "...", "include_temp": true, "include_recycle_bin": false}` |
+| `POST` | `/api/reject` | Body `{"plan_id": "..."}`; cancels a pending plan |
 | `POST` | `/api/reset` | Clears conversation history (same as CLI `reset`) |
 | `GET` | `/api/health` | Returns status plus active provider/model name |
 
@@ -237,8 +240,63 @@ JSON `403`.
   support streaming yet, so there is no Server-Sent Events endpoint.
 - Tool use is shown after the turn as a small "Used <tool>" badge, derived from
   conversation history without changing core logic.
+- Cleanup proposals appear as approval cards under BOB's reply. The card is
+  rebuilt from `GET /api/pending` after a page refresh.
 - The UI assets are bundled under `web/vendor/`, so the page works offline.
 - Multiple tabs share one conversation history; "New chat" resets it for all.
+
+---
+
+## Diagnostics and Safe Cleanup
+
+### `diagnose_system`
+
+Read-only. Explains why the PC may be slow by collecting CPU, RAM, swap, top
+CPU/RAM process groups, fixed-drive free space, temp-folder size, Recycle Bin
+size, startup count, uptime, battery, and power mode. It returns ranked
+findings:
+
+- `critical`
+- `warning`
+- `info`
+
+Process CPU is normalised by logical core count to a system-wide percentage, so
+it is on the same scale as overall CPU. Top process groups include their
+combined CPU/RAM, process count, the PID and short executable path of the
+heaviest process, and a protected flag. BOB's own process tree and Ollama are
+marked `BOB / Ollama (this assistant)` and are never suggested for closing.
+
+Each finding has a one-line message and a suggested fix. Messages label every
+figure, such as `CPU usage`, `RAM usage`, `swap usage`, `battery level`, or
+`drive free space`. The serialized result is capped at about 1500 characters so
+a small local model can relay it.
+
+### `propose_cleanup`
+
+Read-only. Scans only:
+
+- The current user's temp folder, for files older than 24 hours.
+- The Recycle Bin.
+
+It deletes nothing. Instead it stores an in-memory plan with a random ID and a
+10-minute expiry. Only one plan can be pending; a new scan cancels the older
+plan.
+
+Safety rules:
+
+- Symlinks, junctions, and other reparse points are never followed.
+- Locked or unreadable files are skipped.
+- Every path is re-validated at execution time.
+- The web request supplies only the plan ID and two include flags. It can never
+  supply filesystem paths.
+- Plans are single-use.
+- The Recycle Bin is a separate, unchecked-by-default line item on the approval
+  card. Approving it empties the Recycle Bin for all drives, which is
+  irreversible.
+
+There is no LLM-callable delete tool. Deletion lives in `app/cleanup/executor.py`
+and is called only by `POST /api/approve`. Every approve, reject, and execution
+is logged at INFO with the plan ID, counts, and bytes; file paths are not logged.
 
 ---
 
@@ -267,6 +325,8 @@ Tests use mocks — **neither Ollama, a physical microphone, nor speakers** are 
 | Voice input (STT) | ✅ Implemented (Phase 3: faster-whisper, PortAudio) |
 | Voice output (TTS) | ✅ Implemented (Phase 4: Piper neural TTS, sounddevice) |
 | Local web chat UI | ✅ Implemented (FastAPI + static frontend) |
+| System diagnostics | ✅ Implemented (`diagnose_system`) |
+| Approval-gated cleanup | ✅ Implemented (temp + Recycle Bin, web approval) |
 | Wake-word detection | ❌ Not yet |
 | HUD / Cockpit GUI | ❌ Not yet |
 | Browser automation | ❌ Not yet |
@@ -283,16 +343,23 @@ BOB-personal-ai-assistant/
 ├── app/
 │   ├── __init__.py
 │   ├── main.py                  # Entry point
+│   ├── pending_plans.py         # In-memory cleanup plan store
 │   ├── core/
 │   │   ├── __init__.py
 │   │   └── assistant.py         # JarvisAssistant & agentic loop
 │   ├── llm/
 │   │   ├── __init__.py
 │   │   └── ollama_client.py     # OllamaClient
+│   ├── cleanup/
+│   │   ├── __init__.py
+│   │   └── executor.py          # Approval-gated deletion (not a tool)
 │   ├── tools/
 │   │   ├── __init__.py
 │   │   ├── tool.py              # Tool abstraction & ToolResult
 │   │   ├── registry.py          # ToolRegistry
+│   │   ├── windows_facts.py     # Read-only Windows probes
+│   │   ├── diagnose_system.py   # diagnose_system
+│   │   ├── propose_cleanup.py   # propose_cleanup (deletes nothing)
 │   │   ├── system_info.py       # get_system_info
 │   │   ├── open_application.py  # open_application
 │   │   └── search_files.py      # search_files
@@ -321,6 +388,8 @@ BOB-personal-ai-assistant/
 │   ├── test_ollama_client.py
 │   ├── test_text_tool_fallback.py
 │   ├── test_tools.py
+│   ├── test_diagnostics.py
+│   ├── test_cleanup.py
 │   ├── test_voice.py
 │   ├── test_tts.py
 │   └── test_web.py

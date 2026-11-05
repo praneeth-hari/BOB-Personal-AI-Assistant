@@ -9,6 +9,8 @@ from app.tools.audio_volume import AUDIO_VOLUME_TOOL
 from app.tools.screen_brightness import SCREEN_BRIGHTNESS_TOOL
 from app.tools.window_control import WINDOW_CONTROL_TOOL
 from app.tools.web_search import WEB_SEARCH_TOOL
+from app.tools.diagnose_system import DIAGNOSE_SYSTEM_TOOL
+from app.tools.propose_cleanup import PROPOSE_CLEANUP_TOOL
 
 __all__ = [
     "Tool",
@@ -23,6 +25,8 @@ __all__ = [
     "SCREEN_BRIGHTNESS_TOOL",
     "WINDOW_CONTROL_TOOL",
     "WEB_SEARCH_TOOL",
+    "DIAGNOSE_SYSTEM_TOOL",
+    "PROPOSE_CLEANUP_TOOL",
 ]
 
 

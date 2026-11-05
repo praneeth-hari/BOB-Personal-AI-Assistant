@@ -24,6 +24,7 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import threading
@@ -39,6 +40,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
+from app.cleanup.executor import execute_plan
 from app.core.assistant import JarvisAssistant
 from app.llm.errors import LLMConfigurationError
 from app.llm.factory import get_provider_name
@@ -50,6 +52,15 @@ from app.llm.nvidia_client import (
     NvidiaResponseError,
 )
 from app.llm.ollama_client import OllamaConnectionError, OllamaResponseError
+from app.pending_plans import (
+    NoTargetsSelectedError,
+    PlanAlreadyUsedError,
+    PlanExpiredError,
+    PlanNotFoundError,
+    get_action_for_plan,
+    get_pending_action,
+    reject_plan,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +75,20 @@ class ChatRequest(BaseModel):
     """A single user message sent from the browser."""
 
     message: str = Field(..., max_length=32_000)
+
+
+class ApproveRequest(BaseModel):
+    """Approval choices for a stored cleanup plan."""
+
+    plan_id: str = Field(..., min_length=1, max_length=128)
+    include_temp: bool = True
+    include_recycle_bin: bool = False
+
+
+class RejectRequest(BaseModel):
+    """A stored cleanup plan to cancel."""
+
+    plan_id: str = Field(..., min_length=1, max_length=128)
 
 
 # ─── Application state ────────────────────────────────────────────────────────
@@ -167,7 +192,41 @@ def _extract_tools(messages: List[Dict[str, Any]]) -> List[str]:
     return tools
 
 
-def _run_chat(state: _WebState, message: str) -> Tuple[str, List[str]]:
+def _extract_pending_plan_ids(messages: List[Dict[str, Any]]) -> List[str]:
+    """Return plan IDs found in new tool-result history entries."""
+    plan_ids: List[str] = []
+    for message in messages:
+        if message.get("role") != "tool":
+            continue
+        content = message.get("content")
+        if not isinstance(content, str):
+            continue
+        try:
+            payload = json.loads(content)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            continue
+        plan_id = data.get("plan_id")
+        if isinstance(plan_id, str) and plan_id and plan_id not in plan_ids:
+            plan_ids.append(plan_id)
+    return plan_ids
+
+
+def _extract_pending_actions(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Return current pending-action payloads for plan IDs in a turn."""
+    actions: List[Dict[str, Any]] = []
+    for plan_id in _extract_pending_plan_ids(messages):
+        action = get_action_for_plan(plan_id)
+        if action is not None:
+            actions.append(action)
+    return actions
+
+
+def _run_chat(state: _WebState, message: str) -> Tuple[str, List[str], List[Dict[str, Any]]]:
     """Run one assistant turn under the conversation lock."""
     assistant = _ensure_assistant(state)
     if assistant is None:
@@ -180,7 +239,7 @@ def _run_chat(state: _WebState, message: str) -> Tuple[str, List[str]]:
         reply = assistant.chat(message)
         new_messages = assistant.history[before:]
 
-    return reply, _extract_tools(new_messages)
+    return reply, _extract_tools(new_messages), _extract_pending_actions(new_messages)
 
 
 def _run_reset(state: _WebState) -> None:
@@ -246,6 +305,19 @@ def _friendly_error(exc: BaseException) -> Tuple[int, str]:
         return 502, "The NVIDIA API returned an error. Check the server logs."
 
     return 500, "Something went wrong inside BOB. Check the server logs."
+
+
+def _friendly_plan_error(exc: BaseException) -> Tuple[int, str]:
+    """Map cleanup-plan failures to safe HTTP statuses and messages."""
+    if isinstance(exc, PlanNotFoundError):
+        return 404, "Cleanup plan not found. Ask BOB to scan again."
+    if isinstance(exc, PlanExpiredError):
+        return 410, "This cleanup plan has expired. Ask BOB to scan again."
+    if isinstance(exc, PlanAlreadyUsedError):
+        return 409, "This cleanup plan was already used or cancelled."
+    if isinstance(exc, NoTargetsSelectedError):
+        return 400, "Select at least one cleanup target."
+    return 500, "Cleanup failed. Check the server logs."
 
 
 def _log_failure(action: str, exc: BaseException, status: int) -> None:
@@ -354,14 +426,58 @@ def create_app(
         if not payload.message.strip():
             return _json_error(400, "Please enter a message.")
         try:
-            reply, tools_used = await run_in_threadpool(_run_chat, state, payload.message)
+            reply, tools_used, pending_actions = await run_in_threadpool(
+                _run_chat, state, payload.message
+            )
         except AssistantUnavailableError as exc:
             return _json_error(503, str(exc))
         except Exception as exc:  # noqa: BLE001 – never leak details to the browser
             status, message = _friendly_error(exc)
             _log_failure("chat", exc, status)
             return _json_error(status, message)
-        return {"reply": reply, "tools_used": tools_used}
+        return {
+            "reply": reply,
+            "tools_used": tools_used,
+            "pending_actions": pending_actions,
+        }
+
+    @app.get("/api/pending")
+    async def pending():
+        action = await run_in_threadpool(get_pending_action)
+        return {"pending_actions": [action] if action is not None else []}
+
+    @app.post("/api/approve")
+    async def approve(payload: ApproveRequest):
+        try:
+            result = await run_in_threadpool(
+                execute_plan,
+                payload.plan_id,
+                include_temp=payload.include_temp,
+                include_recycle_bin=payload.include_recycle_bin,
+            )
+        except (PlanNotFoundError, PlanExpiredError, PlanAlreadyUsedError, NoTargetsSelectedError) as exc:
+            status, message = _friendly_plan_error(exc)
+            _log_failure("approve", exc, status)
+            return _json_error(status, message)
+        except Exception as exc:  # noqa: BLE001
+            status, message = _friendly_plan_error(exc)
+            logger.warning("Web approve failed (%s).", type(exc).__name__)
+            return _json_error(status, message)
+        return result
+
+    @app.post("/api/reject")
+    async def reject(payload: RejectRequest):
+        try:
+            result = await run_in_threadpool(reject_plan, payload.plan_id)
+        except (PlanNotFoundError, PlanExpiredError, PlanAlreadyUsedError) as exc:
+            status, message = _friendly_plan_error(exc)
+            _log_failure("reject", exc, status)
+            return _json_error(status, message)
+        except Exception as exc:  # noqa: BLE001
+            status, message = _friendly_plan_error(exc)
+            logger.warning("Web reject failed (%s).", type(exc).__name__)
+            return _json_error(status, message)
+        return result
 
     @app.post("/api/reset")
     async def reset():

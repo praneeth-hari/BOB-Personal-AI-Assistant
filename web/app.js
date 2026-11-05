@@ -167,6 +167,220 @@
     return badge;
   }
 
+  function formatBytes(value) {
+    let size = Number(value);
+    if (!Number.isFinite(size) || size < 0) size = 0;
+    const units = ["B", "KB", "MB", "GB", "TB"];
+    let index = 0;
+    while (size >= 1024 && index < units.length - 1) {
+      size /= 1024;
+      index += 1;
+    }
+    return (index === 0 ? Math.round(size) : size.toFixed(1)) + " " + units[index];
+  }
+
+  function disableStalePendingCards() {
+    messagesEl.querySelectorAll(".pending-card").forEach((card) => {
+      if (card.dataset.done === "true") return;
+      card.dataset.done = "true";
+      card.classList.add("stale");
+      card.querySelectorAll("input, button").forEach((element) => {
+        element.disabled = true;
+      });
+      const status = card.querySelector(".pending-status");
+      if (status) status.textContent = "Superseded by a newer cleanup proposal.";
+    });
+  }
+
+  function setPendingStatus(card, text, tone) {
+    const status = card.querySelector(".pending-status");
+    if (!status) return;
+    status.textContent = text;
+    status.className = "pending-status" + (tone ? " " + tone : "");
+  }
+
+  function makePendingCard(action) {
+    const card = document.createElement("section");
+    card.className = "pending-card";
+    card.dataset.planId = String(action.plan_id || "");
+
+    const head = document.createElement("div");
+    head.className = "pending-head";
+    const title = document.createElement("span");
+    title.className = "pending-title";
+    title.textContent = "Cleanup proposal";
+    const expiry = document.createElement("span");
+    expiry.className = "pending-expiry";
+    const remaining = Math.max(
+      0,
+      Math.round((Number(action.expires_at || 0) * 1000 - Date.now()) / 60000)
+    );
+    expiry.textContent = remaining > 0 ? "Expires in ~" + remaining + " min" : "Expired";
+    head.appendChild(title);
+    head.appendChild(expiry);
+
+    const summary = document.createElement("p");
+    summary.className = "pending-summary";
+    summary.textContent = String(action.summary || "");
+
+    const targets = document.createElement("div");
+    targets.className = "pending-targets";
+    const checkboxes = {};
+
+    (Array.isArray(action.targets) ? action.targets : []).forEach((target) => {
+      const row = document.createElement("label");
+      row.className = "pending-target";
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.dataset.target = String(target.key || "");
+      checkbox.checked = Boolean(target.default_include) && !target.empty;
+      checkbox.disabled = Boolean(target.empty);
+      checkboxes[String(target.key || "")] = checkbox;
+
+      const text = document.createElement("span");
+      text.className = "pending-target-text";
+
+      const name = document.createElement("span");
+      name.className = "pending-target-name";
+      name.textContent = String(target.label || target.key || "Cleanup target");
+
+      const detail = document.createElement("span");
+      detail.className = "pending-target-detail";
+      detail.textContent = target.empty
+        ? "Nothing to remove"
+        : String(target.file_count || 0) +
+          " item(s), " +
+          formatBytes(target.bytes || 0);
+
+      text.appendChild(name);
+      text.appendChild(detail);
+
+      if (target.warning) {
+        const warning = document.createElement("span");
+        warning.className = "pending-warning";
+        warning.textContent = String(target.warning);
+        text.appendChild(warning);
+      }
+
+      row.appendChild(checkbox);
+      row.appendChild(text);
+      targets.appendChild(row);
+    });
+
+    const total = document.createElement("p");
+    total.className = "pending-total";
+    total.textContent =
+      "Available total: " +
+      String(action.total_files || 0) +
+      " item(s), " +
+      formatBytes(action.total_bytes || 0);
+
+    const actions = document.createElement("div");
+    actions.className = "pending-actions";
+
+    const approve = document.createElement("button");
+    approve.type = "button";
+    approve.className = "pending-button approve";
+    approve.textContent = "Approve selected";
+
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "pending-button cancel";
+    cancel.textContent = "Cancel";
+
+    const status = document.createElement("p");
+    status.className = "pending-status";
+
+    function finish(text, tone) {
+      card.dataset.done = "true";
+      checkboxes && Object.values(checkboxes).forEach((box) => (box.disabled = true));
+      approve.disabled = true;
+      cancel.disabled = true;
+      setPendingStatus(card, text, tone);
+    }
+
+    approve.addEventListener("click", async () => {
+      const includeTemp = Boolean(checkboxes.temp && checkboxes.temp.checked);
+      const includeRecycle = Boolean(
+        checkboxes.recycle_bin && checkboxes.recycle_bin.checked
+      );
+      if (!includeTemp && !includeRecycle) {
+        setPendingStatus(card, "Select at least one cleanup target.", "error");
+        return;
+      }
+
+      approve.disabled = true;
+      cancel.disabled = true;
+      setPendingStatus(card, "Cleaning up...", "");
+
+      try {
+        const response = await fetch("/api/approve", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            plan_id: action.plan_id,
+            include_temp: includeTemp,
+            include_recycle_bin: includeRecycle,
+          }),
+        });
+        const data = await readJson(response);
+        if (!response.ok) {
+          throw new Error((data && data.error) || "Cleanup could not be completed.");
+        }
+
+        let message =
+          String(data.files_removed || 0) +
+          " file(s) removed, " +
+          formatBytes(data.bytes_freed || 0) +
+          " freed.";
+        if (data.files_skipped) {
+          message += " " + String(data.files_skipped) + " item(s) skipped.";
+        }
+        if (Array.isArray(data.errors) && data.errors.length) {
+          message += " " + data.errors.join(" ");
+          finish(message, "error");
+        } else {
+          finish(message, "success");
+        }
+      } catch (err) {
+        finish(err.message || "Cleanup could not be completed.", "error");
+      }
+    });
+
+    cancel.addEventListener("click", async () => {
+      approve.disabled = true;
+      cancel.disabled = true;
+      setPendingStatus(card, "Cancelling...", "");
+
+      try {
+        const response = await fetch("/api/reject", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ plan_id: action.plan_id }),
+        });
+        const data = await readJson(response);
+        if (!response.ok) {
+          throw new Error((data && data.error) || "Cleanup could not be cancelled.");
+        }
+        finish("Cleanup cancelled.", "success");
+      } catch (err) {
+        finish(err.message || "Cleanup could not be cancelled.", "error");
+      }
+    });
+
+    actions.appendChild(approve);
+    actions.appendChild(cancel);
+
+    card.appendChild(head);
+    card.appendChild(summary);
+    card.appendChild(targets);
+    card.appendChild(total);
+    card.appendChild(actions);
+    card.appendChild(status);
+    return card;
+  }
+
   function appendUserMessage(text) {
     showConversation();
 
@@ -182,7 +396,7 @@
     scrollToBottom(true);
   }
 
-  function appendAssistantMessage(text, tools) {
+  function appendAssistantMessage(text, tools, pendingActions) {
     showConversation();
 
     const row = document.createElement("div");
@@ -198,6 +412,12 @@
     content.innerHTML = renderMarkdown(text);
 
     body.appendChild(content);
+
+    if (Array.isArray(pendingActions) && pendingActions.length > 0) {
+      disableStalePendingCards();
+      pendingActions.forEach((action) => body.appendChild(makePendingCard(action)));
+    }
+
     row.appendChild(body);
     messagesEl.appendChild(row);
 
@@ -404,7 +624,12 @@
         throw new Error("BOB returned an empty reply. Check the server logs.");
       }
 
-      appendAssistantMessage(data.reply, data.tools_used || []);
+      const tools = data.tools_used || [];
+      const pending = data.pending_actions || [];
+      if (pending.length === 0 && tools.includes("propose_cleanup")) {
+        disableStalePendingCards();
+      }
+      appendAssistantMessage(data.reply, tools, pending);
     } catch (err) {
       removeThinking(thinkingRow);
       const message =
@@ -485,7 +710,25 @@
     }
   }
 
+  async function loadPendingActions() {
+    try {
+      const response = await fetch("/api/pending", { cache: "no-store" });
+      const data = await readJson(response);
+      if (!response.ok || !data || !Array.isArray(data.pending_actions)) return;
+      if (data.pending_actions.length === 0) return;
+
+      appendAssistantMessage(
+        "A cleanup proposal is waiting for your approval.",
+        [],
+        data.pending_actions
+      );
+    } catch (_err) {
+      /* Pending actions are optional; never block the chat page. */
+    }
+  }
+
   void checkHealth();
+  void loadPendingActions();
   window.setInterval(() => void checkHealth(), HEALTH_INTERVAL_MS);
 
   document.addEventListener("visibilitychange", () => {

@@ -9,7 +9,9 @@ an API key, nor a microphone is required.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,6 +19,11 @@ from fastapi.testclient import TestClient
 from app.interfaces.web import create_app
 from app.llm.errors import LLMConfigurationError
 from app.llm.ollama_client import OllamaConnectionError
+from app.pending_plans import (
+    PlanAlreadyUsedError,
+    PlanExpiredError,
+    PlanNotFoundError,
+)
 
 PORT = 8000
 BASE_URL = f"http://127.0.0.1:{PORT}"
@@ -129,6 +136,7 @@ def test_chat_returns_reply_and_tools_used(client: TestClient) -> None:
     assert response.json() == {
         "reply": "Mock reply.",
         "tools_used": ["open_application"],
+        "pending_actions": [],
     }
 
 
@@ -190,6 +198,212 @@ def test_configuration_error_is_reported_safely() -> None:
 
     assert chat.status_code == 503
     assert "NVIDIA_API_KEY" in chat.json()["error"]
+
+
+# ─── Pending cleanup actions ─────────────────────────────────────────────────
+
+def _pending_action(plan_id: str = "plan-123") -> Dict[str, Any]:
+    return {
+        "plan_id": plan_id,
+        "status": "pending",
+        "summary": "Ready to clean up 2 temp file(s).",
+        "targets": [
+            {
+                "key": "temp",
+                "label": "Temporary files older than 24 hours",
+                "file_count": 2,
+                "bytes": 2048,
+                "default_include": True,
+                "warning": None,
+                "empty": False,
+            },
+            {
+                "key": "recycle_bin",
+                "label": "Recycle Bin (all drives)",
+                "file_count": 0,
+                "bytes": 0,
+                "default_include": False,
+                "warning": "Irreversible. Empties the Recycle Bin for all drives.",
+                "empty": True,
+            },
+        ],
+        "total_files": 2,
+        "total_bytes": 2048,
+        "expires_at": 9999999999,
+    }
+
+
+class PendingAssistant(MockAssistant):
+    def chat(self, message: str) -> str:
+        self._history.append({"role": "user", "content": message})
+        self._history.append(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"function": {"name": "propose_cleanup", "arguments": {}}}],
+            }
+        )
+        self._history.append(
+            {
+                "role": "tool",
+                "content": json.dumps(
+                    {"success": True, "data": {"plan_id": "plan-123", "pending": True}}
+                ),
+            }
+        )
+        self._history.append({"role": "assistant", "content": self.reply})
+        return self.reply
+
+
+def test_chat_returns_pending_actions(monkeypatch: pytest.MonkeyPatch) -> None:
+    app = create_app(assistant_factory=PendingAssistant, port=PORT)
+    monkeypatch.setattr(
+        "app.interfaces.web.get_action_for_plan",
+        lambda plan_id: _pending_action(plan_id),
+    )
+
+    with TestClient(app, base_url=BASE_URL) as test_client:
+        response = test_client.post("/api/chat", json={"message": "Clean up"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["tools_used"] == ["propose_cleanup"]
+    assert body["pending_actions"][0]["plan_id"] == "plan-123"
+
+
+def test_pending_endpoint_returns_current_plan(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "app.interfaces.web.get_pending_action",
+        lambda: _pending_action(),
+    )
+    app = create_app(assistant_factory=MockAssistant, port=PORT)
+
+    with TestClient(app, base_url=BASE_URL) as test_client:
+        response = test_client.get("/api/pending")
+
+    assert response.status_code == 200
+    assert response.json()["pending_actions"][0]["plan_id"] == "plan-123"
+
+
+def test_pending_endpoint_returns_empty_when_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.interfaces.web.get_pending_action", lambda: None)
+    app = create_app(assistant_factory=MockAssistant, port=PORT)
+
+    with TestClient(app, base_url=BASE_URL) as test_client:
+        response = test_client.get("/api/pending")
+
+    assert response.status_code == 200
+    assert response.json() == {"pending_actions": []}
+
+
+def test_approve_executes_selected_targets(monkeypatch: pytest.MonkeyPatch) -> None:
+    execute = MagicMock(
+        return_value={
+            "status": "completed",
+            "plan_id": "plan-123",
+            "files_removed": 2,
+            "bytes_freed": 2048,
+            "files_skipped": 0,
+            "targets": [],
+            "errors": [],
+        }
+    )
+    monkeypatch.setattr("app.interfaces.web.execute_plan", execute)
+    app = create_app(assistant_factory=MockAssistant, port=PORT)
+
+    with TestClient(app, base_url=BASE_URL) as test_client:
+        response = test_client.post(
+            "/api/approve",
+            json={
+                "plan_id": "plan-123",
+                "include_temp": True,
+                "include_recycle_bin": False,
+                "paths": ["C:\\outside"],
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["files_removed"] == 2
+    execute.assert_called_once_with(
+        "plan-123",
+        include_temp=True,
+        include_recycle_bin=False,
+    )
+
+
+def test_approve_rejects_foreign_origin(monkeypatch: pytest.MonkeyPatch) -> None:
+    execute = MagicMock()
+    monkeypatch.setattr("app.interfaces.web.execute_plan", execute)
+    app = create_app(assistant_factory=MockAssistant, port=PORT)
+
+    with TestClient(app, base_url=BASE_URL) as test_client:
+        response = test_client.post(
+            "/api/approve",
+            json={"plan_id": "plan-123"},
+            headers={"origin": "http://evil.example"},
+        )
+
+    assert response.status_code == 403
+    assert response.json() == {"error": "Invalid Origin header."}
+    execute.assert_not_called()
+
+
+def test_approve_requires_json_content_type(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.interfaces.web.execute_plan", MagicMock())
+    app = create_app(assistant_factory=MockAssistant, port=PORT)
+
+    with TestClient(app, base_url=BASE_URL) as test_client:
+        response = test_client.post(
+            "/api/approve",
+            content="plan_id=plan-123",
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
+
+    assert response.status_code == 415
+
+
+@pytest.mark.parametrize(
+    ("error", "status"),
+    [
+        (PlanNotFoundError("missing"), 404),
+        (PlanExpiredError("expired"), 410),
+        (PlanAlreadyUsedError("used"), 409),
+    ],
+)
+def test_approve_maps_plan_errors(
+    monkeypatch: pytest.MonkeyPatch, error: Exception, status: int
+) -> None:
+    monkeypatch.setattr(
+        "app.interfaces.web.execute_plan",
+        MagicMock(side_effect=error),
+    )
+    app = create_app(assistant_factory=MockAssistant, port=PORT)
+
+    with TestClient(app, base_url=BASE_URL) as test_client:
+        response = test_client.post("/api/approve", json={"plan_id": "plan-123"})
+
+    assert response.status_code == status
+    assert "error" in response.json()
+
+
+def test_reject_cancels_plan(monkeypatch: pytest.MonkeyPatch) -> None:
+    reject = MagicMock(
+        return_value={
+            "status": "rejected",
+            "plan_id": "plan-123",
+            "total_files": 2,
+            "total_bytes": 2048,
+        }
+    )
+    monkeypatch.setattr("app.interfaces.web.reject_plan", reject)
+    app = create_app(assistant_factory=MockAssistant, port=PORT)
+
+    with TestClient(app, base_url=BASE_URL) as test_client:
+        response = test_client.post("/api/reject", json={"plan_id": "plan-123"})
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "rejected"
+    reject.assert_called_once_with("plan-123")
 
 
 # ─── Reset ────────────────────────────────────────────────────────────────────

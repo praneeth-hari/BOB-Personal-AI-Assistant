@@ -184,7 +184,9 @@ class TestToolRegistry:
         assert "screen_brightness" in names
         assert "window_control" in names
         assert "web_search" in names
-        assert len(names) == 11
+        assert "diagnose_system" in names
+        assert "propose_cleanup" in names
+        assert len(names) == 13
 
     def test_execute_tool_exception_returns_error(self):
         def exploding_fn() -> ToolResult:
