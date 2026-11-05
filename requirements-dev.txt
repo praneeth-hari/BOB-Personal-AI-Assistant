@@ -3,3 +3,4 @@
 
 pytest>=8.0.0             # Test runner
 pytest-cov>=5.0.0         # Coverage reporting
+httpx>=0.27.0             # HTTP client used by FastAPI's TestClient

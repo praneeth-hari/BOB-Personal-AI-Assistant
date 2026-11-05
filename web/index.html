@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>BOB · Local AI Assistant</title>
+
+  <!-- Offline assets: no CDN, no build step. -->
+  <link rel="stylesheet" href="/static/vendor/hljs-light.css" id="hljs-light">
+  <link rel="stylesheet" href="/static/vendor/hljs-dark.css" id="hljs-dark" disabled>
+  <link rel="stylesheet" href="/static/styles.css">
+
+  <script defer src="/static/vendor/marked.min.js"></script>
+  <script defer src="/static/vendor/purify.min.js"></script>
+  <script defer src="/static/vendor/highlight.min.js"></script>
+  <script defer src="/static/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">B</span>
+      <span class="brand-text">
+        <span class="brand-name">BOB</span>
+        <span class="brand-sub">Local AI Assistant</span>
+      </span>
+    </div>
+
+    <div class="topbar-actions">
+      <div id="connection" class="connection" data-state="checking" role="status" aria-live="polite" title="Checking connection…">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="connection-label">Connecting…</span>
+      </div>
+
+      <button id="new-chat" class="icon-button" type="button" title="New chat" aria-label="New chat">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+      </button>
+
+      <button id="theme-toggle" class="icon-button" type="button" title="Toggle theme" aria-label="Toggle theme">
+        <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" stroke-width="1.8"/>
+          <path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6"
+                fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+        </svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M20 14.2A8.1 8.1 0 0 1 9.8 4a8.4 8.4 0 1 0 10.2 10.2Z"
+                fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <main id="chat-scroll" class="chat-scroll">
+    <div class="chat-column">
+      <section id="empty-state" class="empty-state">
+        <div class="orb" aria-hidden="true"></div>
+        <h1>BOB</h1>
+        <p class="empty-sub">Your local-first assistant. Ask about your PC, search files, or just chat.</p>
+
+        <div class="examples" aria-label="Example prompts">
+          <button class="example" type="button" data-prompt="What is my battery status?">
+            <span class="example-title">Check my PC</span>
+            <span class="example-text">What is my battery status?</span>
+          </button>
+          <button class="example" type="button" data-prompt="Find PDF files in my Documents folder.">
+            <span class="example-title">Find something</span>
+            <span class="example-text">Find PDF files in my Documents folder.</span>
+          </button>
+          <button class="example" type="button" data-prompt="Open Notepad and check my RAM usage.">
+            <span class="example-title">Take an action</span>
+            <span class="example-text">Open Notepad and check my RAM usage.</span>
+          </button>
+        </div>
+      </section>
+
+      <div id="messages" class="messages" role="log" aria-live="polite" aria-label="Conversation"></div>
+    </div>
+  </main>
+
+  <footer class="composer-wrap">
+    <form id="composer" class="composer" autocomplete="off">
+      <div class="composer-inner">
+        <label class="sr-only" for="input">Message BOB</label>
+        <textarea
+          id="input"
+          name="message"
+          rows="1"
+          maxlength="32000"
+          placeholder="Message BOB…"
+          enterkeyhint="send"
+        ></textarea>
+
+        <div class="composer-actions">
+          <!-- FUTURE: microphone button. Voice input is intentionally not implemented yet. -->
+          <button
+            id="mic-slot"
+            class="icon-button mic-slot"
+            type="button"
+            disabled
+            title="Voice input coming soon"
+            aria-label="Voice input (coming soon)"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="9" y="3" width="6" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/>
+              <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M8.5 21h7"
+                    fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+          </button>
+
+          <button id="send" class="send-button" type="submit" disabled title="Send message" aria-label="Send message">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4.5 12h13M11 5.5 17.5 12 11 18.5"
+                    fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <p class="composer-hint">Enter to send · Shift+Enter for a new line</p>
+    </form>
+  </footer>
+
+  <div id="toast" class="toast" role="alert" hidden></div>
+</body>
+</html>

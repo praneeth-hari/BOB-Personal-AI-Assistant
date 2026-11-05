@@ -20,10 +20,10 @@ capabilities can be layered on top without restructuring the project.
 ## Architecture
 
 ```
-CLI / Text input
+CLI / Browser input
        │
-       ▼
- app/interfaces/cli.py   ← pure I/O, no logic
+       ├── app/interfaces/cli.py   ← pure I/O, no logic
+       ├── app/interfaces/web.py   ← FastAPI transport, no logic
        │
        ▼
  app/core/assistant.py   ← manages conversation history, calls LLM
@@ -50,6 +50,8 @@ the `LLMClient` protocol).
 | `app/core/assistant.py` | Conversation history, message routing |
 | `app/llm/ollama_client.py` | Ollama HTTP API abstraction |
 | `app/interfaces/cli.py` | Read-eval-print loop, user I/O |
+| `app/interfaces/web.py` | Local FastAPI transport for the browser UI |
+| `web/` | Static HTML/CSS/JS chat page and bundled vendor assets |
 | `app/tools/registry.py` | Tool registry scaffold (empty in V1) |
 
 ---
@@ -192,6 +194,54 @@ Microphone → faster-whisper → JarvisAssistant → response text → Piper �
 
 ---
 
+## Web Interface
+
+BOB also has a local browser frontend. It is a thin transport layer: all
+conversation logic stays in `app/core/assistant.py`.
+
+Start it:
+
+```powershell
+python -m app.interfaces.web
+```
+
+Then open **http://localhost:8000** (or `http://127.0.0.1:8000`).
+
+The server binds to `127.0.0.1` only. It is not exposed on your LAN and has no
+authentication. Do not change this binding unless you understand the risk:
+BOB can launch applications and control parts of this laptop.
+
+Set `BOB_WEB_PORT` to use a different port:
+
+```powershell
+$env:BOB_WEB_PORT = "8080"
+python -m app.interfaces.web
+```
+
+### Endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/` | Serves the chat page |
+| `POST` | `/api/chat` | Send `{"message": "..."}`; returns `{"reply": "...", "tools_used": [...]}` |
+| `POST` | `/api/reset` | Clears conversation history (same as CLI `reset`) |
+| `GET` | `/api/health` | Returns status plus active provider/model name |
+
+POST requests must use `Content-Type: application/json`. Requests whose `Host`
+or `Origin` header is not local to the configured port are rejected with a
+JSON `403`.
+
+### Behaviour notes
+
+- Replies arrive as one complete JSON response. BOB's LLM clients do not
+  support streaming yet, so there is no Server-Sent Events endpoint.
+- Tool use is shown after the turn as a small "Used <tool>" badge, derived from
+  conversation history without changing core logic.
+- The UI assets are bundled under `web/vendor/`, so the page works offline.
+- Multiple tabs share one conversation history; "New chat" resets it for all.
+
+---
+
 ## Running the Tests
 
 ```powershell
@@ -216,6 +266,7 @@ Tests use mocks — **neither Ollama, a physical microphone, nor speakers** are 
 | Local Tool Execution | ✅ Implemented (Phase 2: system info, app launcher, file search) |
 | Voice input (STT) | ✅ Implemented (Phase 3: faster-whisper, PortAudio) |
 | Voice output (TTS) | ✅ Implemented (Phase 4: Piper neural TTS, sounddevice) |
+| Local web chat UI | ✅ Implemented (FastAPI + static frontend) |
 | Wake-word detection | ❌ Not yet |
 | HUD / Cockpit GUI | ❌ Not yet |
 | Browser automation | ❌ Not yet |
@@ -255,7 +306,13 @@ BOB-personal-ai-assistant/
 │   │   └── manual_tts_test.py   # Isolated TTS test script
 │   └── interfaces/
 │       ├── __init__.py
-│       └── cli.py               # CLISession (text & bidirectional voice)
+│       ├── cli.py               # CLISession (text & bidirectional voice)
+│       └── web.py               # FastAPI transport for the browser UI
+├── web/
+│   ├── index.html               # Chat page
+│   ├── styles.css               # Light/dark responsive styles
+│   ├── app.js                   # Chat UI behaviour (no assistant logic)
+│   └── vendor/                  # Bundled offline JS/CSS libraries
 ├── models/
 │   └── piper/                   # Offline Piper voice models & configs
 ├── tests/
@@ -265,7 +322,8 @@ BOB-personal-ai-assistant/
 │   ├── test_text_tool_fallback.py
 │   ├── test_tools.py
 │   ├── test_voice.py
-│   └── test_tts.py
+│   ├── test_tts.py
+│   └── test_web.py
 ├── .env.example
 ├── .gitignore
 ├── README.md

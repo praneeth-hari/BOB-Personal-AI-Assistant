@@ -1,5 +1,7 @@
 # Runtime dependencies
 requests>=2.31.0          # HTTP client for Ollama API
+fastapi>=0.115.0          # Local web chat interface API framework
+uvicorn>=0.30.0           # ASGI server for the local web interface
 psutil>=5.9.0             # CPU / RAM metrics for get_system_info tool
 faster-whisper>=1.0.0     # Local offline Speech-to-Text inference (CTranslate2)
 piper-tts>=1.2.0          # Local offline neural Text-to-Speech synthesis (ONNX)
